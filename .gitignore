@@ -1,0 +1,21 @@
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python/
+env/
+venv/
+.venv/
+
+# KML/KMZ outputs
+zonas_contingencia.kml
+zonas_contingencia.kmz
+
+# OS generated files
+.DS_Store
+.Trashes
+ehthumbs.db
+Thumbs.db
