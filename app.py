@@ -51,18 +51,6 @@ def create_circle(map_obj, lat, lon, radius, color, text):
         popup=text
     ).add_to(map_obj)
 
-def create_circle(map_obj, lat, lon, radius, color, text):
-    """Desenha um círculo de contingência no mapa."""
-    folium.Circle(
-        location=[lat, lon],
-        radius=radius,
-        color=color,
-        fill=True,
-        fill_color=color,
-        fill_opacity=0.2,
-        popup=text
-    ).add_to(map_obj)
-
 @st.cache_data
 def generate_full_map(lat, lon, df):
     """Gera o mapa completo com zonas e granjas, e armazena o resultado em cache."""
