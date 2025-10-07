@@ -1,9 +1,15 @@
 #!/bin/bash
-# Script to generate a KML file and then package it into a KMZ archive.
+# Script to generate KML files and package them into a single KMZ archive.
 
-# Define file paths relative to the project root
-KML_FILE="../output/zonas_contingencia.kml"
-KMZ_FILE="../output/zonas_contingencia.kmz"
+PROJECT_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+OUTPUT_DIR="$PROJECT_ROOT/output"
+ASSETS_DIR="$PROJECT_ROOT/assets"
+SRC_DIR="$PROJECT_ROOT/src"
+
+ZONAS_KML_FILE="$OUTPUT_DIR/zonas_contingencia.kml"
+GRANJAS_KML_FILE="$OUTPUT_DIR/granjas.kml"
+FINAL_KMZ_FILE="$OUTPUT_DIR/zonas_contingencia_completo.kmz"
+ICON_FILE="$ASSETS_DIR/icone_frango.png"
 
 # Default coordinates (if not provided by user)
 DEFAULT_LAT="-24.33160375868075"
@@ -23,7 +29,7 @@ elif [ "$#" -eq 2 ]; then
 elif [ "$#" -gt 2 ]; then
     echo "Uso: $0 [latitude,longitude] ou $0 [latitude] [longitude]"
     echo "Exemplo: $0 -24.331062507879754,-53.85689460743224"
-    echo "Exemplo: $0 -24.331062507879754 -53.85689414802796"
+    echo "Exemplo: $0 -24.331062507879754 -53.85489414802796"
     echo "Ou execute sem argumentos para usar as coordenadas padrão ou inserir manualmente."
     exit 1
 else
@@ -46,42 +52,53 @@ else
     fi
 fi
 
-echo "\n--- Iniciando Geração do KML e KMZ ---"
+echo "\n--- Iniciando Geração dos Arquivos KML ---"
 
 # Ensure the output directory exists
-mkdir -p "$(dirname "$KML_FILE")"
+mkdir -p "$OUTPUT_DIR"
 
-echo "Gerando arquivo KML com src/gerar_kml.py..."
-python3 "$(dirname "$0")/../src/gerar_kml.py" "$LAT_LON_ARG"
-
-# Check if KML generation was successful
+# --- Gerando KML das Zonas de Contingência ---
+echo "Gerando KML das zonas com src/gerar_kml.py..."
+python3 "$SRC_DIR/gerar_kml.py" "$LAT_LON_ARG"
 if [ $? -ne 0 ]; then
-    echo "Erro: Falha ao gerar o arquivo KML. Verifique a saída do script Python acima."
+    echo "Erro: Falha ao gerar o KML das zonas. Verifique a saída do script Python."
     exit 1
 fi
 
-echo "KML gerado com sucesso em: $(realpath "$KML_FILE")"
-
-# --- Gerando Pontos das Granjas (KMZ) ---
-echo "\n--- Gerando Pontos das Granjas (KMZ) ---"
-python3 "$(dirname "$0")/../src/gerar_granja_kmz.py"
+# --- Gerando KML dos Pontos das Granjas ---
+echo "\nGerando KML das granjas com src/gerar_granja_kmz.py..."
+python3 "$SRC_DIR/gerar_granja_kmz.py"
 if [ $? -ne 0 ]; then
-    echo "Erro: Falha ao gerar o KMZ dos pontos das granjas. Verifique a saída do script Python acima."
+    echo "Erro: Falha ao gerar o KML das granjas. Verifique a saída do script Python."
     exit 1
 fi
 
-# Remove old kmz file if it exists
-if [ -f "$KMZ_FILE" ]; then
-    echo "Removendo arquivo KMZ existente: $(realpath "$KMZ_FILE")"
-    rm "$KMZ_FILE"
+# --- Empacotando tudo em um único KMZ ---
+echo "\n--- Empacotando Arquivos em um KMZ ---"
+
+if [ -f "$FINAL_KMZ_FILE" ]; then
+    echo "Removendo arquivo KMZ anterior: $FINAL_KMZ_FILE"
+    rm "$FINAL_KMZ_FILE"
 fi
 
-echo "Empacotando '$KML_FILE' em '$KMZ_FILE'..."
-zip -j "$KMZ_FILE" "$KML_FILE"
+# Create a temporary directory for staging files for the KMZ
+TMP_DIR=$(mktemp -d)
+mkdir -p "$TMP_DIR/files"
+
+# Copy the KML files and the icon to the staging directory
+cp "$ZONAS_KML_FILE" "$TMP_DIR/"
+cp "$GRANJAS_KML_FILE" "$TMP_DIR/"
+cp "$ICON_FILE" "$TMP_DIR/files/"
+
+echo "Criando arquivo KMZ: $FINAL_KMZ_FILE"
+( cd "$TMP_DIR" && zip -r "$FINAL_KMZ_FILE" . )
+
+# Cleanup the temporary directory
+rm -rf "$TMP_DIR"
 
 if [ $? -eq 0 ]; then
     echo "\n--- Processo Concluído com Sucesso ---"
-    echo "Arquivo KMZ criado com sucesso em: $(realpath "$KMZ_FILE")"
+    echo "Arquivo KMZ final criado em: $FINAL_KMZ_FILE"
 else
     echo "Erro ao criar o arquivo KMZ."
     exit 1

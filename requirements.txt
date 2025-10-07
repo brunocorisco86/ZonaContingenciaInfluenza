@@ -1,3 +1,6 @@
-# No external dependencies identified for now.
-# Add any new dependencies here, e.g.,
-# requests==2.28.1
+streamlit
+pandas
+geopandas
+folium
+streamlit-folium
+pyproj
