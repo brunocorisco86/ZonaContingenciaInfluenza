@@ -72,6 +72,13 @@ def classify_farms_by_zone(lat_foco, lon_foco, df):
             nucleo_id = int(nucleo_id)
             
             if nucleo_id not in aggregated_results[zone_name]:
+                try:
+                    coords = farm['coordenadas'].split(',')
+                    lat_granja_for_nucleo = float(coords[0].strip())
+                    lon_granja_for_nucleo = float(coords[1].strip())
+                except (ValueError, IndexError, AttributeError):
+                    continue
+
                 aggregated_results[zone_name][nucleo_id] = {
                     'aviarios': [],
                     'tecnico': farm.get('tecnico', 'N/A'),
@@ -79,8 +86,8 @@ def classify_farms_by_zone(lat_foco, lon_foco, df):
                     'bp_propriedade': set(),
                     'total_aves': 0,
                     'total_area': 0,
-                    'latitude': lat_granja,
-                    'longitude': lon_granja
+                    'latitude': lat_granja_for_nucleo,
+                    'longitude': lon_granja_for_nucleo
                 }
             
             agg_nucleo = aggregated_results[zone_name][nucleo_id]
