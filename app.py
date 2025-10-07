@@ -469,7 +469,7 @@ def generate_pdf_report(classified_data, lat, lon):
             pdf.multi_cell(0, 6, f"  BP da Propriedade: {str([str(bp) for bp in data['bp_propriedade']])[1:-1]}", ln=1)
         pdf.ln(10)
         
-    return pdf.output()
+    return bytes(pdf.output())
 
 
 # =============================================================================
