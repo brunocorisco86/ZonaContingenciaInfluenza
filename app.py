@@ -78,7 +78,9 @@ def classify_farms_by_zone(lat_foco, lon_foco, df):
                     'proprietario': farm.get('proprietario', 'N/A'),
                     'bp_propriedade': set(),
                     'total_aves': 0,
-                    'total_area': 0
+                    'total_area': 0,
+                    'latitude': lat_granja,
+                    'longitude': lon_granja
                 }
             
             agg_nucleo = aggregated_results[zone_name][nucleo_id]
@@ -467,6 +469,16 @@ def generate_pdf_report(classified_data, lat, lon):
             pdf.multi_cell(0, 6, f"  Nº de Aviários: {len(data['aviarios'])}", ln=1)
             pdf.multi_cell(0, 6, f"  Aviários no núcleo: {str(sorted(data['aviarios']))[1:-1]}", ln=1)
             pdf.multi_cell(0, 6, f"  BP da Propriedade: {str([str(bp) for bp in data['bp_propriedade']])[1:-1]}", ln=1)
+
+            # Adicionar coordenadas e link do Google Maps
+            lat, lon = data['latitude'], data['longitude']
+            maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+            pdf.multi_cell(0, 6, f"  Coordenadas: {lat}, {lon}", ln=1)
+            pdf.set_text_color(0, 0, 255)
+            pdf.set_font("Arial", "U", 10)
+            pdf.multi_cell(0, 6, f"  Abrir no Google Maps", ln=1, link=maps_link)
+            pdf.set_font("Arial", "", 10)
+            pdf.set_text_color(0, 0, 0)
         pdf.ln(10)
         
     return bytes(pdf.output())
