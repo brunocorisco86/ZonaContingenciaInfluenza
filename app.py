@@ -5,9 +5,90 @@ from streamlit_folium import st_folium
 import math
 import os
 
+from math import radians, cos, sin, asin, sqrt
+
 # =============================================================================
 # Funções de Carregamento de Dados
 # =============================================================================
+
+@st.cache_data
+def haversine_distance(lon1, lat1, lon2, lat2):
+    """
+    Calcula a distância em metros entre dois pontos na Terra.
+    """
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a)) 
+    r = 6371000 # Raio da Terra em metros
+    return c * r
+
+@st.cache_data
+def classify_farms_by_zone(lat_foco, lon_foco, df):
+    """Classifica as granjas nas zonas de contingência e agrega os dados por núcleo."""
+    print("[INFO] Classificando produtores e agregando por núcleo...")
+    
+    # Dicionário para armazenar dados brutos por zona
+    raw_zone_data = {
+        "Perifoco (0-3km)": [],
+        "Vigilância (3-7km)": [],
+        "Proteção (7-15km)": []
+    }
+
+    # 1. Classifica cada aviário em sua zona mais restrita
+    for _, row in df.iterrows():
+        try:
+            coords = row['coordenadas'].split(',')
+            lat_granja = float(coords[0].strip())
+            lon_granja = float(coords[1].strip())
+            
+            distance = haversine_distance(lon_foco, lat_foco, lon_granja, lat_granja)
+            
+            farm_data = row.to_dict()
+
+            if distance <= 3000:
+                raw_zone_data["Perifoco (0-3km)"].append(farm_data)
+            elif distance <= 7000:
+                raw_zone_data["Vigilância (3-7km)"].append(farm_data)
+            elif distance <= 15000:
+                raw_zone_data["Proteção (7-15km)"].append(farm_data)
+        except (ValueError, IndexError, AttributeError):
+            continue
+
+    # 2. Agrega os dados por 'núcleo' dentro de cada zona
+    aggregated_results = {
+        "Perifoco (0-3km)": {},
+        "Vigilância (3-7km)": {},
+        "Proteção (7-15km)": {}
+    }
+
+    for zone_name, farms in raw_zone_data.items():
+        for farm in farms:
+            nucleo_id = farm.get('nucleo')
+            if pd.isna(nucleo_id):
+                continue
+            
+            nucleo_id = int(nucleo_id)
+            
+            if nucleo_id not in aggregated_results[zone_name]:
+                aggregated_results[zone_name][nucleo_id] = {
+                    'aviarios': [],
+                    'tecnico': farm.get('tecnico', 'N/A'),
+                    'proprietario': farm.get('proprietario', 'N/A'),
+                    'bp_propriedade': set(),
+                    'total_aves': 0,
+                    'total_area': 0
+                }
+            
+            agg_nucleo = aggregated_results[zone_name][nucleo_id]
+            agg_nucleo['aviarios'].append(farm.get('fazenda'))
+            agg_nucleo['bp_propriedade'].add(farm.get('bp_propriedade'))
+            agg_nucleo['total_aves'] += pd.to_numeric(farm.get('capacidade'), errors='coerce') or 0
+            agg_nucleo['total_area'] += pd.to_numeric(farm.get('area'), errors='coerce') or 0
+
+    return aggregated_results
+
 
 @st.cache_data
 def load_farm_data():
@@ -130,12 +211,11 @@ lon_foco = st.sidebar.number_input(
 
 st.sidebar.info("O mapa é atualizado automaticamente ao alterar as coordenadas.")
 
-with st.sidebar.expander("Ver Plano de Contingência"):
-    st.markdown(contingency_plan_text, unsafe_allow_html=True)
+
 
 
 # --- Painel Principal ---
-tab1, tab2 = st.tabs(["🗺️ Mapa de Contingência", "📄 Plano de Contingência"])
+tab1, tab2, tab3 = st.tabs(["🗺️ Mapa de Contingência", "📄 Plano de Contingência", "📋 Listas de Produtores"])
 
 # Gerar ou obter o mapa do cache
 map_to_display = generate_full_map(lat_foco, lon_foco, df_farms)
@@ -148,6 +228,36 @@ with tab1:
 with tab2:
     st.header("Plano de Contingência para Influenza Aviária")
     st.markdown(contingency_plan_text, unsafe_allow_html=True)
+
+with tab3:
+    st.header("Lista de Produtores por Zona de Contingência")
+    classified_nucleos = classify_farms_by_zone(lat_foco, lon_foco, df_farms)
+    
+    st.info("As listas mostram os núcleos de produção agrupados pela zona de contingência mais restrita em que se encontram.")
+
+    # A ordem de exibição é da maior para a menor zona
+    zone_order = ["Proteção (7-15km)", "Vigilância (3-7km)", "Perifoco (0-3km)"]
+
+    for zone_name in zone_order:
+        nucleos = classified_nucleos[zone_name]
+        sorted_nucleos = sorted(nucleos.items())
+
+        with st.expander(f"**{zone_name}** - {len(sorted_nucleos)} núcleos"):
+            if not sorted_nucleos:
+                st.write("Nenhum núcleo encontrado nesta zona.")
+                continue
+            
+            for nucleo_id, data in sorted_nucleos:
+                st.subheader(f"Núcleo: {nucleo_id} - {data['proprietario']}")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total de Aves", f"{int(data['total_aves']):,}".replace(",", "."))
+                col2.metric("Área Total (m²)", f"{int(data['total_area']):,}".replace(",", "."))
+                col3.metric("Nº de Aviários", len(data['aviarios']))
+                
+                st.markdown(f"**Técnico:** {data['tecnico']}")
+                st.markdown(f"**Aviários no núcleo:** {str(sorted(data['aviarios']))[1:-1]}")
+                st.markdown(f"**BP da Propriedade:** {str([str(bp) for bp in data['bp_propriedade']])[1:-1]}")
+                st.divider()
 
 # =============================================================================
 # Funções de Exportação para KML
@@ -258,28 +368,159 @@ def merge_kml_contents(zones_content, farms_content):
 </kml>'''
     return final_kml
 
+from fpdf import FPDF
+import datetime
+
+# =============================================================================
+# Funções de Relatório
+# =============================================================================
+
+def generate_report_html(classified_data, lat, lon):
+    """Gera uma string HTML formatada para impressão."""
+    now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    
+    html = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: sans-serif; }}
+            h1, h2, h3 {{ color: #333; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+            th {{ background-color: #f2f2f2; }}
+            .header {{ margin-bottom: 30px; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Relatório de Zonas de Contingência</h1>
+            <p>Gerado em: {now}</p>
+            <p>Coordenadas do Foco: Latitude={lat}, Longitude={lon}</p>
+        </div>
+    """
+
+    zone_order = ["Perifoco (0-3km)", "Vigilância (3-7km)", "Proteção (7-15km)"]
+    for zone_name in zone_order:
+        nucleos = classified_data[zone_name]
+        sorted_nucleos = sorted(nucleos.items())
+        
+        html += f"<h2>{zone_name} ({len(sorted_nucleos)} núcleos)</h2>"
+        
+        if not sorted_nucleos:
+            html += "<p>Nenhum núcleo encontrado nesta zona.</p>"
+            continue
+
+        html += "<table><tr><th>Núcleo</th><th>Proprietário</th><th>Técnico</th><th>Aviários</th><th>Total Aves</th><th>Área Total (m²)</th><th>BP Propriedade</th></tr>"
+        for nucleo_id, data in sorted_nucleos:
+            html += f"""<tr>
+                <td>{nucleo_id}</td>
+                <td>{data['proprietario']}</td>
+                <td>{data['tecnico']}</td>
+                <td>{str(sorted(data['aviarios']))[1:-1]}</td>
+                <td>{int(data['total_aves'])}</td>
+                <td>{int(data['total_area'])}</td>
+                <td>{str([str(bp) for bp in data['bp_propriedade']])[1:-1]}</td>
+            </tr>"""
+        html += "</table>"
+
+    html += "</body></html>"
+    return html
+
+def generate_pdf_report(classified_data, lat, lon):
+    """Gera um relatório em PDF a partir dos dados classificados."""
+    print("[INFO] Gerando relatório PDF...")
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    
+    pdf.cell(0, 10, "Relatório de Zonas de Contingência", 0, 1, "C")
+    pdf.ln(10)
+    
+    now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    pdf.set_font("Arial", "", 12)
+    pdf.cell(0, 8, f"Gerado em: {now}", 0, 1)
+    pdf.cell(0, 8, f"Coordenadas do Foco: Latitude={lat}, Longitude={lon}", 0, 1)
+    pdf.ln(10)
+
+    zone_order = ["Perifoco (0-3km)", "Vigilância (3-7km)", "Proteção (7-15km)"]
+    for zone_name in zone_order:
+        nucleos = classified_data[zone_name]
+        sorted_nucleos = sorted(nucleos.items())
+        
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(0, 10, f"{zone_name} ({len(sorted_nucleos)} núcleos)", 0, 1)
+        
+        if not sorted_nucleos:
+            pdf.set_font("Arial", "I", 10)
+            pdf.cell(0, 10, " Nenhum núcleo encontrado nesta zona.", 0, 1)
+            pdf.ln(5)
+            continue
+
+        for nucleo_id, data in sorted_nucleos:
+            pdf.ln(5)
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(0, 7, f"Núcleo: {nucleo_id} - {data['proprietario']}", 0, 1)
+            pdf.set_font("Arial", "", 10)
+            pdf.multi_cell(0, 6, f"  Técnico: {data['tecnico']}", ln=1)
+            pdf.multi_cell(0, 6, f"  Total de Aves: {int(data['total_aves']):,}".replace(",", "."), ln=1)
+            pdf.multi_cell(0, 6, f"  Área Total (m²): {int(data['total_area']):,}".replace(",", "."), ln=1)
+            pdf.multi_cell(0, 6, f"  Nº de Aviários: {len(data['aviarios'])}", ln=1)
+            pdf.multi_cell(0, 6, f"  Aviários no núcleo: {str(sorted(data['aviarios']))[1:-1]}", ln=1)
+            pdf.multi_cell(0, 6, f"  BP da Propriedade: {str([str(bp) for bp in data['bp_propriedade']])[1:-1]}", ln=1)
+        pdf.ln(10)
+        
+    return pdf.output()
+
+
 # =============================================================================
 # Lógica de Exportação na Barra Lateral
 # =============================================================================
 
-st.sidebar.header("Exportar Mapa")
+st.sidebar.header("Relatório e Exportação")
 
+# Botão para baixar o mapa HTML
+map_html_for_download = generate_full_map(lat_foco, lon_foco, df_farms)
+st.sidebar.download_button(
+    label="📥 Baixar Mapa (HTML)",
+    data=map_html_for_download,
+    file_name="mapa_contingencia.html",
+    mime="text/html"
+)
+
+# Botão para gerar o relatório de impressão
+if st.sidebar.button("Gerar Relatório para Impressão"):
+    classified_data = classify_farms_by_zone(lat_foco, lon_foco, df_farms)
+    report_html = generate_report_html(classified_data, lat_foco, lon_foco)
+    st.session_state.report_html = report_html
+
+# Botão para baixar o relatório em PDF
+classified_data_for_pdf = classify_farms_by_zone(lat_foco, lon_foco, df_farms)
+_pdf_data = generate_pdf_report(classified_data_for_pdf, lat_foco, lon_foco)
+st.sidebar.download_button(
+    label="📄 Baixar Relatório (PDF)",
+    data=_pdf_data,
+    file_name="relatorio_contingencia.pdf",
+    mime="application/pdf"
+)
+
+# Lógica para o botão de download KML
 if st.sidebar.button("Preparar KML para Download"):
     print("\n[INFO] Iniciando geração de KML para download...")
-    # Gerar conteúdo KML em memória
-    print("[INFO] Gerando conteúdo KML para as zonas...")
     zones_kml = generate_zones_kml_content(lat_foco, lon_foco)
-    print("[INFO] Gerando conteúdo KML para as granjas...")
     farms_kml = generate_farms_kml_content(df_farms)
-    
-    # Mesclar os conteúdos
-    print("[INFO] Mesclando conteúdos KML...")
     final_kml_data = merge_kml_contents(zones_kml, farms_kml)
-    
-    # Disponibilizar para download
+    st.session_state.kml_data = final_kml_data
+    print("[INFO] Dados KML prontos para download.")
+
+if 'kml_data' in st.session_state and st.session_state.kml_data:
     st.sidebar.download_button(
         label="📥 Baixar Arquivo KML",
-        data=final_kml_data,
+        data=st.session_state.kml_data,
         file_name="zonas_contingencia_completo.kml",
         mime="application/vnd.google-earth.kml+xml"
     )
+
+if 'report_html' in st.session_state and st.session_state.report_html:
+    with st.expander("Visualizar Relatório para Impressão", expanded=True):
+        st.info("Use a função 'Imprimir' do seu navegador (Ctrl+P) e 'Salvar como PDF' para gerar o documento.")
+        st.components.v1.html(st.session_state.report_html, height=800, scrolling=True)
