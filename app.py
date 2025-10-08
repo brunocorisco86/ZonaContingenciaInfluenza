@@ -47,11 +47,11 @@ def classify_farms_by_zone(lat_foco, lon_foco, df):
             
             farm_data = row.to_dict()
 
-            if distance <= 3000:
+            if distance <= 6000:
                 raw_zone_data["Perifoco (0-3km)"].append(farm_data)
-            elif distance <= 7000:
+            elif distance <= 14000:
                 raw_zone_data["Vigilância (3-7km)"].append(farm_data)
-            elif distance <= 15000:
+            elif distance <= 30000:
                 raw_zone_data["Proteção (7-15km)"].append(farm_data)
         except (ValueError, IndexError, AttributeError):
             continue
@@ -156,9 +156,9 @@ def generate_full_map(lat, lon, df):
 
     # Definir e desenhar as zonas de contingência
     zones = [
-        {"name": "Perifoco (3km)", "radius": 3000, "color": "red"},
-        {"name": "Vigilância (7km)", "radius": 7000, "color": "purple"},
-        {"name": "Proteção (15km)", "radius": 15000, "color": "blue"}
+        {"name": "Perifoco (3km)", "radius": 6000, "color": "red"},
+        {"name": "Vigilância (7km)", "radius": 14000, "color": "purple"},
+        {"name": "Proteção (15km)", "radius": 30000, "color": "blue"}
     ]
 
     for zone in zones:
@@ -276,9 +276,9 @@ def generate_zones_kml_content(lat, lon):
     """Gera o conteúdo KML para as zonas de contingência."""
     # Lógica adaptada de gerar_kml.py
     zones = [
-        {"name": "PROTEÇÃO", "radius": 15000, "poly_color": "80FF0000", "line_color": "ffff0000"},
-        {"name": "VIGILANCIA", "radius": 7000, "poly_color": "80C800C8", "line_color": "ffC800C8"},
-        {"name": "PERIFOCO", "radius": 3000, "poly_color": "800000FF", "line_color": "ff0000FF"}
+        {"name": "PROTEÇÃO", "radius": 30000, "poly_color": "80FF0000", "line_color": "ffff0000"},
+        {"name": "VIGILANCIA", "radius": 14000, "poly_color": "80C800C8", "line_color": "ffC800C8"},
+        {"name": "PERIFOCO", "radius": 6000, "poly_color": "800000FF", "line_color": "ff0000FF"}
     ]
     
     styles_kml = ""
