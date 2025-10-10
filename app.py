@@ -32,8 +32,8 @@ def classify_farms_by_zone(lat_foco, lon_foco, df):
     # Dicionário para armazenar dados brutos por zona
     raw_zone_data = {
         "Perifoco (0-3km)": [],
-        "Vigilância (3-7km)": [],
-        "Proteção (7-15km)": []
+        "Vigilância (3-10km)": [],
+        "Proteção (10-25km)": []
     }
 
     # 1. Classifica cada aviário em sua zona mais restrita
@@ -50,17 +50,17 @@ def classify_farms_by_zone(lat_foco, lon_foco, df):
             if distance <= 3000:
                 raw_zone_data["Perifoco (0-3km)"].append(farm_data)
             elif distance <= 10000:
-                raw_zone_data["Vigilância (3-7km)"].append(farm_data)
+                raw_zone_data["Vigilância (3-10km)"].append(farm_data)
             elif distance <= 25000:
-                raw_zone_data["Proteção (7-15km)"].append(farm_data)
+                raw_zone_data["Proteção (10-25km)"].append(farm_data)
         except (ValueError, IndexError, AttributeError):
             continue
 
     # 2. Agrega os dados por 'núcleo' dentro de cada zona
     aggregated_results = {
         "Perifoco (0-3km)": {},
-        "Vigilância (3-7km)": {},
-        "Proteção (7-15km)": {}
+        "Vigilância (3-10km)": {},
+        "Proteção (10-25km)": {}
     }
 
     for zone_name, farms in raw_zone_data.items():
@@ -129,40 +129,62 @@ def load_contingency_plan():
 # Funções de Geração de Mapa
 # =============================================================================
 
-def create_circle(map_obj, lat, lon, radius, color, text):
-    """Desenha um círculo de contingência no mapa."""
-    folium.Circle(
-        location=[lat, lon],
-        radius=radius,
-        color=color,
-        fill=True,
-        fill_color=color,
-        fill_opacity=0.2,
-        popup=text
-    ).add_to(map_obj)
-
 @st.cache_data
 def generate_full_map(lat, lon, df):
-    """Gera o mapa completo com zonas e granjas, e armazena o resultado em cache."""
+    """Gera o mapa completo com zonas de contingência em formato de anel e granjas."""
     print(f"[INFO] Gerando novo mapa para as coordenadas: Latitude={lat}, Longitude={lon}")
-    m = folium.Map(location=[lat, lon], zoom_start=10)
+    m = folium.Map(location=[lat, lon], zoom_start=9)
 
     # Adicionar marcador para o foco
     folium.Marker(
         [lat, lon],
-        popup="FOCO",
+        popup="<b>FOCO</b><br>Ponto central do foco de influenza aviária.",
         icon=folium.Icon(color='red', icon='info-sign')
     ).add_to(m)
 
-    # Definir e desenhar as zonas de contingência
+    # Helper para gerar coordenadas de um círculo
+    def get_circle_coords(center_lat, center_lon, radius_m):
+        coords = []
+        for i in range(101):
+            angle = (i / 100) * 2 * math.pi
+            dx = radius_m * math.cos(angle)
+            dy = radius_m * math.sin(angle)
+            point_lat = center_lat + (dy / 111111)
+            point_lon = center_lon + (dx / (111111 * math.cos(math.radians(center_lat))))
+            coords.append([point_lat, point_lon])
+        return coords
+
+    # Definir zonas com raios e descrições
     zones = [
-        {"name": "Perifoco (3km)", "radius": 3000, "color": "red"},
-        {"name": "Vigilância (7km)", "radius": 10000, "color": "purple"},
-        {"name": "Proteção (15km)", "radius": 25000, "color": "blue"}
+        {
+            "name": "Proteção (10-25km)", "outer_radius": 25000, "inner_radius": 10000, "color": "blue",
+            "description": "Zona de controle e monitoramento. Fiscalização do trânsito de veículos e produtos avícolas. Barreiras sanitárias para prevenir a entrada do vírus."
+        },
+        {
+            "name": "Vigilância (3-10km)", "outer_radius": 10000, "inner_radius": 3000, "color": "purple",
+            "description": "Zona de vigilância ativa. Restrição no trânsito de aves e produtos. Suspensão de GTAs e monitoramento epidemiológico intensivo."
+        },
+        {
+            "name": "Perifoco (0-3km)", "outer_radius": 3000, "inner_radius": 0, "color": "red",
+            "description": "Área de interdição máxima. Sacrifício de aves e controle total de acesso. Medidas rigorosas de desinfecção e vazio sanitário obrigatório."
+        }
     ]
 
     for zone in zones:
-        create_circle(m, lat, lon, zone["radius"], zone["color"], zone["name"])
+        locations = [get_circle_coords(lat, lon, zone["outer_radius"])]
+        if zone["inner_radius"] > 0:
+            inner_coords = get_circle_coords(lat, lon, zone["inner_radius"])
+            inner_coords.reverse()
+            locations.append(inner_coords)
+
+        folium.Polygon(
+            locations=locations,
+            color=zone["color"],
+            fill=True,
+            fill_color=zone["color"],
+            fill_opacity=0.2,
+            popup=f"<b>{zone['name']}</b><br>{zone['description']}"
+        ).add_to(m)
 
     # Adicionar marcadores para as granjas
     if not df.empty:
@@ -245,7 +267,7 @@ with tab3:
     st.info("As listas mostram os núcleos de produção agrupados pela zona de contingência mais restrita em que se encontram.")
 
     # A ordem de exibição é da maior para a menor zona
-    zone_order = ["Proteção (7-15km)", "Vigilância (3-7km)", "Perifoco (0-3km)"]
+    zone_order = ["Proteção (10-25km)", "Vigilância (3-10km)", "Perifoco (0-3km)"]
 
     for zone_name in zone_order:
         nucleos = classified_nucleos[zone_name]
@@ -444,7 +466,7 @@ def generate_report_html(classified_data, lat, lon):
         </div>
     """
 
-    zone_order = ["Perifoco (0-3km)", "Vigilância (3-7km)", "Proteção (7-15km)"]
+    zone_order = ["Perifoco (0-3km)", "Vigilância (3-10km)", "Proteção (10-25km)"]
     for zone_name in zone_order:
         nucleos = classified_data[zone_name]
         sorted_nucleos = sorted(nucleos.items())
@@ -468,7 +490,7 @@ def generate_report_html(classified_data, lat, lon):
             </tr>"""
         html += "</table>"
 
-    html += "</body></html>"
+    html += """</body></html>"""
     return html
 
 def generate_pdf_report(classified_data, lat, lon):
@@ -487,7 +509,7 @@ def generate_pdf_report(classified_data, lat, lon):
     pdf.cell(0, 8, f"Coordenadas do Foco: Latitude={lat}, Longitude={lon}", 0, 1)
     pdf.ln(10)
 
-    zone_order = ["Perifoco (0-3km)", "Vigilância (3-7km)", "Proteção (7-15km)"]
+    zone_order = ["Perifoco (0-3km)", "Vigilância (3-10km)", "Proteção (10-25km)"]
     for zone_name in zone_order:
         nucleos = classified_data[zone_name]
         sorted_nucleos = sorted(nucleos.items())
