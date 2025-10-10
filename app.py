@@ -658,7 +658,7 @@ def generate_pdf_report(classified_data, lat, lon, focus_name):
 st.sidebar.header("Relatório e Exportação")
 
 # Botão para baixar o mapa HTML
-map_html_for_download = generate_full_map(lat_foco, lon_foco, df_farms)
+map_html_for_download = generate_full_map(lat_foco, lon_foco, df_farms, abatedouro_lat, abatedouro_lon, st.session_state.focus_name)
 st.sidebar.download_button(
     label="📥 Baixar Mapa (HTML)",
     data=map_html_for_download,
