@@ -25,6 +25,36 @@ def haversine_distance(lon1, lat1, lon2, lat2):
     return c * r
 
 @st.cache_data
+def find_closest_nucleus(target_lat, target_lon, df):
+    """
+    Encontra o núcleo de granja mais próximo a um ponto alvo dentro de 300m.
+    Retorna (lat_nucleo, lon_nucleo, nome_nucleo) se encontrado, caso contrário None.
+    """
+    min_distance = 300 # meters
+    closest_nucleus_coords = None
+    closest_nucleus_name = None
+
+    for _, row in df.iterrows():
+        try:
+            coords = row['coordenadas'].split(',')
+            farm_lat = float(coords[0].strip())
+            farm_lon = float(coords[1].strip())
+            
+            distance = haversine_distance(target_lon, target_lat, farm_lon, farm_lat)
+            
+            if distance <= min_distance:
+                if closest_nucleus_coords is None or distance < min_distance: # Update if closer
+                    min_distance = distance
+                    closest_nucleus_coords = (farm_lat, farm_lon)
+                    closest_nucleus_name = f"Núcleo {row.get('nucleo', 'N/A')} - {row.get('proprietario', 'N/A')}"
+        except (ValueError, IndexError, AttributeError):
+            continue
+            
+    if closest_nucleus_coords:
+        return closest_nucleus_coords[0], closest_nucleus_coords[1], closest_nucleus_name
+    return None, None, None
+
+@st.cache_data
 def classify_farms_by_zone(lat_foco, lon_foco, df):
     """Classifica as granjas nas zonas de contingência e agrega os dados por núcleo."""
     print("[INFO] Classificando produtores e agregando por núcleo...")
@@ -125,12 +155,28 @@ def load_contingency_plan():
     except FileNotFoundError:
         return "Arquivo 'plano de contingencia.md' não encontrado."
 
+@st.cache_data
+def get_abatedouro_coords():
+    """Carrega as coordenadas do abatedouro."""
+    file_path = os.path.join("data", "coordenadas_abatedouro.txt")
+    try:
+        with open(file_path, 'r') as f:
+            coords_str = f.read().strip()
+            lat_str, lon_str = coords_str.split(',')
+            return float(lat_str), float(lon_str)
+    except FileNotFoundError:
+        st.error(f"Arquivo de coordenadas do abatedouro não encontrado em: {file_path}")
+        return None, None
+    except ValueError:
+        st.error(f"Formato inválido no arquivo de coordenadas do abatedouro: {file_path}")
+        return None, None
+
 # =============================================================================
 # Funções de Geração de Mapa
 # =============================================================================
 
 @st.cache_data
-def generate_full_map(lat, lon, df):
+def generate_full_map(lat, lon, df, abatedouro_lat, abatedouro_lon, focus_name):
     """Gera o mapa completo com zonas de contingência em formato de anel e granjas."""
     print(f"[INFO] Gerando novo mapa para as coordenadas: Latitude={lat}, Longitude={lon}")
     m = folium.Map(location=[lat, lon], zoom_start=9)
@@ -138,9 +184,17 @@ def generate_full_map(lat, lon, df):
     # Adicionar marcador para o foco
     folium.Marker(
         [lat, lon],
-        popup="<b>FOCO</b><br>Ponto central do foco de influenza aviária.",
+        popup=f"<b>FOCO:</b> {focus_name}<br>Ponto central do foco de influenza aviária.",
         icon=folium.Icon(color='red', icon='info-sign')
     ).add_to(m)
+
+    # Adicionar marcador para o Abatedouro
+    if abatedouro_lat is not None and abatedouro_lon is not None:
+        folium.Marker(
+            [abatedouro_lat, abatedouro_lon],
+            popup="<b>Abatedouro de Aves - C.Vale</b>",
+            icon=folium.Icon(color='blue', icon='building')
+        ).add_to(m)
 
     # Helper para gerar coordenadas de um círculo
     def get_circle_coords(center_lat, center_lon, radius_m):
@@ -228,19 +282,66 @@ contingency_plan_text = load_contingency_plan()
 # --- Barra Lateral ---
 st.sidebar.header("Configurações do Foco")
 
-lat_foco = st.sidebar.number_input(
+# Get abatedouro coordinates
+abatedouro_lat, abatedouro_lon = get_abatedouro_coords()
+
+# Initialize session state for focus if not already set
+if 'current_focus_lat' not in st.session_state:
+    st.session_state.current_focus_lat = abatedouro_lat
+    st.session_state.current_focus_lon = abatedouro_lon
+    st.session_state.focus_type = "Abatedouro"
+    st.session_state.focus_name = "Abatedouro de Aves - C.Vale"
+
+lat_foco_input = st.sidebar.number_input(
     'Latitude do Foco',
-    value=-24.33135069928127,
-    format="%.15f"
+    value=st.session_state.current_focus_lat,
+    format="%.15f",
+    key="lat_foco_input"
 )
 
-lon_foco = st.sidebar.number_input(
+lon_foco_input = st.sidebar.number_input(
     'Longitude do Foco',
-    value=-53.85542105733513,
-    format="%.15f"
+    value=st.session_state.current_focus_lon,
+    format="%.15f",
+    key="lon_foco_input"
 )
 
+# Update session state if user changes input
+if lat_foco_input != st.session_state.current_focus_lat or \
+   lon_foco_input != st.session_state.current_focus_lon:
+    st.session_state.current_focus_lat = lat_foco_input
+    st.session_state.current_focus_lon = lon_foco_input
+    st.session_state.focus_type = "Manual"
+    st.session_state.focus_name = f"Manual ({lat_foco_input:.4f}, {lon_foco_input:.4f})"
+
+# Button to reset to abatedouro
+if st.sidebar.button("Definir Foco no Abatedouro"):
+    st.session_state.current_focus_lat = abatedouro_lat
+    st.session_state.current_focus_lon = abatedouro_lon
+    st.session_state.focus_type = "Abatedouro"
+    st.session_state.focus_name = "Abatedouro de Aves - C.Vale"
+
+# --- Proximity Logic ---
+# Only apply proximity logic if the focus is not explicitly set to Abatedouro or already a Nucleus
+# This prevents re-snapping if the user manually selected a nucleus or the abatedouro
+if st.session_state.focus_type not in ["Abatedouro", "Núcleo Próximo"]:
+    closest_lat, closest_lon, closest_name = find_closest_nucleus(
+        st.session_state.current_focus_lat, 
+        st.session_state.current_focus_lon, 
+        df_farms
+    )
+    if closest_lat is not None:
+        st.session_state.current_focus_lat = closest_lat
+        st.session_state.current_focus_lon = closest_lon
+        st.session_state.focus_type = "Núcleo Próximo"
+        st.session_state.focus_name = closest_name
+
+st.sidebar.info(f"Foco Atual: **{st.session_state.focus_name}**")
 st.sidebar.info("O mapa é atualizado automaticamente ao alterar as coordenadas.")
+
+# Assign the current focus from session state to lat_foco and lon_foco for downstream functions
+lat_foco = st.session_state.current_focus_lat
+lon_foco = st.session_state.current_focus_lon
 
 
 
@@ -249,11 +350,11 @@ st.sidebar.info("O mapa é atualizado automaticamente ao alterar as coordenadas.
 tab1, tab2, tab3 = st.tabs(["🗺️ Mapa de Contingência", "📄 Plano de Contingência", "📋 Listas de Produtores"])
 
 # Gerar ou obter o mapa do cache
-map_to_display = generate_full_map(lat_foco, lon_foco, df_farms)
+map_to_display = generate_full_map(lat_foco, lon_foco, df_farms, abatedouro_lat, abatedouro_lon, st.session_state.focus_name)
 
 with tab1:
     st.header("Mapa Interativo")
-    map_html = generate_full_map(lat_foco, lon_foco, df_farms)
+    map_html = generate_full_map(lat_foco, lon_foco, df_farms, abatedouro_lat, abatedouro_lon, st.session_state.focus_name)
     st.components.v1.html(map_html, height=750)
 
 with tab2:
@@ -352,11 +453,12 @@ def generate_zones_kml_parts(lat, lon):
         </Placemark>'''
     return styles_kml, polygons_kml
 
-def generate_foco_kml_parts(lat, lon):
+def generate_foco_kml_parts(lat, lon, focus_name):
     """Gera as partes KML (estilo e placemark) para o ponto de foco."""
     foco_placemark = f'''
     <Placemark>
-      <name>FOCO</name>
+      <name>{focus_name}</name>
+      <description><![CDATA[Ponto central do foco de influenza aviária.]]></description>
       <styleUrl>#style_foco</styleUrl>
       <Point><coordinates>{lon},{lat},0</coordinates></Point>
     </Placemark>'''
@@ -493,7 +595,7 @@ def generate_report_html(classified_data, lat, lon):
     html += """</body></html>"""
     return html
 
-def generate_pdf_report(classified_data, lat, lon):
+def generate_pdf_report(classified_data, lat, lon, focus_name):
     """Gera um relatório em PDF a partir dos dados classificados."""
     print("[INFO] Gerando relatório PDF...")
     pdf = FPDF()
@@ -506,7 +608,7 @@ def generate_pdf_report(classified_data, lat, lon):
     now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     pdf.set_font("Arial", "", 12)
     pdf.cell(0, 8, f"Gerado em: {now}", 0, 1)
-    pdf.cell(0, 8, f"Coordenadas do Foco: Latitude={lat}, Longitude={lon}", 0, 1)
+    pdf.cell(0, 8, f"Foco: {focus_name} (Latitude={lat}, Longitude={lon})", 0, 1)
     pdf.ln(10)
 
     zone_order = ["Perifoco (0-3km)", "Vigilância (3-10km)", "Proteção (10-25km)"]
@@ -572,7 +674,7 @@ if st.sidebar.button("Gerar Relatório para Impressão"):
 
 # Botão para baixar o relatório em PDF
 classified_data_for_pdf = classify_farms_by_zone(lat_foco, lon_foco, df_farms)
-_pdf_data = generate_pdf_report(classified_data_for_pdf, lat_foco, lon_foco)
+_pdf_data = generate_pdf_report(classified_data_for_pdf, lat_foco, lon_foco, st.session_state.focus_name)
 st.sidebar.download_button(
     label="📄 Baixar Relatório (PDF)",
     data=_pdf_data,
@@ -586,7 +688,7 @@ if st.sidebar.button("Preparar KML para Download"):
     
     # Gerar partes KML separadamente
     zone_styles, zone_polygons = generate_zones_kml_parts(lat_foco, lon_foco)
-    foco_style, foco_placemark = generate_foco_kml_parts(lat_foco, lon_foco)
+    foco_style, foco_placemark = generate_foco_kml_parts(lat_foco, lon_foco, st.session_state.focus_name)
     farm_style, farm_placemarks = generate_farms_kml_parts(df_farms)
     
     # Combinar em um único KML com pastas
