@@ -272,9 +272,8 @@ with tab3:
 # Funções de Exportação para KML
 # =============================================================================
 
-def generate_zones_kml_content(lat, lon):
-    """Gera o conteúdo KML para as zonas de contingência."""
-    # Lógica adaptada de gerar_kml.py
+def generate_zones_kml_parts(lat, lon):
+    """Gera as partes KML (estilos e polígonos) para as zonas de contingência."""
     zones = [
         {"name": "PROTEÇÃO", "radius": 25000, "poly_color": "80FF0000", "line_color": "ffff0000"},
         {"name": "VIGILANCIA", "radius": 10000, "poly_color": "80C800C8", "line_color": "ffC800C8"},
@@ -290,7 +289,7 @@ def generate_zones_kml_content(lat, lon):
         <Style id="{style_id}">
           <LineStyle><color>{zone["line_color"]}</color><width>2</width></LineStyle>
           <PolyStyle><color>{zone["poly_color"]}</color></PolyStyle>
-        </Style> '''
+        </Style>'''
         
         coords = []
         for i in range(65):
@@ -310,7 +309,10 @@ def generate_zones_kml_content(lat, lon):
             <outerBoundaryIs><LinearRing><coordinates>{polygon_coords}</coordinates></LinearRing></outerBoundaryIs>
           </Polygon>
         </Placemark>'''
+    return styles_kml, polygons_kml
 
+def generate_foco_kml_parts(lat, lon):
+    """Gera as partes KML (estilo e placemark) para o ponto de foco."""
     foco_placemark = f'''
     <Placemark>
       <name>FOCO</name>
@@ -325,12 +327,10 @@ def generate_zones_kml_content(lat, lon):
             <scale>1.5</scale>
         </IconStyle>
     </Style>'''
+    return foco_style, foco_placemark
 
-    return styles_kml + foco_style + foco_placemark + polygons_kml
-
-def generate_farms_kml_content(df):
-    """Gera o conteúdo KML para os pontos das granjas."""
-    # Lógica adaptada de gerar_granja_kmz.py
+def generate_farms_kml_parts(df):
+    """Gera as partes KML (estilo e placemarks) para os pontos das granjas."""
     kml_placemarks = []
     if not df.empty:
         for _, row in df.iterrows():
@@ -362,17 +362,34 @@ def generate_farms_kml_content(df):
         <LabelStyle><scale>0</scale></LabelStyle>
     </Style>'''
     
-    return icon_style + "\n".join(kml_placemarks)
+    return icon_style, "\n".join(kml_placemarks)
 
-def merge_kml_contents(zones_content, farms_content):
-    """Combina múltiplos conteúdos KML em um único documento."""
+def merge_kml_contents(zone_styles, zone_polygons, foco_style, foco_placemark, farm_style, farm_placemarks):
+    """Combina múltiplos conteúdos KML em um único documento com pastas."""
     
     final_kml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
     <name>Zonas de Contingência e Granjas</name>
-    {zones_content}
-    {farms_content}
+    
+    <!-- Estilos -->
+    {zone_styles}
+    {foco_style}
+    {farm_style}
+
+    <!-- Pastas com os dados -->
+    <Folder>
+        <name>Zonas de Contenção</name>
+        {zone_polygons}
+    </Folder>
+    <Folder>
+        <name>Foco</name>
+        {foco_placemark}
+    </Folder>
+    <Folder>
+        <name>Produtores</name>
+        {farm_placemarks}
+    </Folder>
   </Document>
 </kml>'''
     return final_kml
@@ -525,9 +542,19 @@ st.sidebar.download_button(
 # Lógica para o botão de download KML
 if st.sidebar.button("Preparar KML para Download"):
     print("\n[INFO] Iniciando geração de KML para download...")
-    zones_kml = generate_zones_kml_content(lat_foco, lon_foco)
-    farms_kml = generate_farms_kml_content(df_farms)
-    final_kml_data = merge_kml_contents(zones_kml, farms_kml)
+    
+    # Gerar partes KML separadamente
+    zone_styles, zone_polygons = generate_zones_kml_parts(lat_foco, lon_foco)
+    foco_style, foco_placemark = generate_foco_kml_parts(lat_foco, lon_foco)
+    farm_style, farm_placemarks = generate_farms_kml_parts(df_farms)
+    
+    # Combinar em um único KML com pastas
+    final_kml_data = merge_kml_contents(
+        zone_styles, zone_polygons, 
+        foco_style, foco_placemark, 
+        farm_style, farm_placemarks
+    )
+    
     st.session_state.kml_data = final_kml_data
     print("[INFO] Dados KML prontos para download.")
 
