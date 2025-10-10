@@ -275,9 +275,27 @@ with tab3:
 def generate_zones_kml_parts(lat, lon):
     """Gera as partes KML (estilos e polígonos) para as zonas de contingência."""
     zones = [
-        {"name": "PROTEÇÃO", "radius": 25000, "poly_color": "80FF0000", "line_color": "ffff0000"},
-        {"name": "VIGILANCIA", "radius": 10000, "poly_color": "80C800C8", "line_color": "ffC800C8"},
-        {"name": "PERIFOCO", "radius": 3000, "poly_color": "800000FF", "line_color": "ff0000FF"}
+        {
+            "name": "PROTEÇÃO", 
+            "radius": 25000, 
+            "poly_color": "80FF0000", 
+            "line_color": "ffff0000",
+            "description": "Zona de controle e monitoramento. Fiscalização do trânsito de veículos e produtos avícolas. Barreiras sanitárias para prevenir a entrada do vírus."
+        },
+        {
+            "name": "VIGILANCIA", 
+            "radius": 10000, 
+            "poly_color": "80C800C8", 
+            "line_color": "ffC800C8",
+            "description": "Zona de vigilância ativa. Restrição no trânsito de aves e produtos. Suspensão de GTAs e monitoramento epidemiológico intensivo em todas as propriedades."
+        },
+        {
+            "name": "PERIFOCO", 
+            "radius": 3000, 
+            "poly_color": "800000FF", 
+            "line_color": "ff0000FF",
+            "description": "Área de interdição máxima. Sacrifício de aves e controle total de acesso. Medidas rigorosas de desinfecção e vazio sanitário obrigatório."
+        }
     ]
     
     styles_kml = ""
@@ -304,6 +322,7 @@ def generate_zones_kml_parts(lat, lon):
         polygons_kml += f'''
         <Placemark>
           <name>{zone["name"]}</name>
+          <description><![CDATA[{zone["description"]}]]></description>
           <styleUrl>#{style_id}</styleUrl>
           <Polygon>
             <outerBoundaryIs><LinearRing><coordinates>{polygon_coords}</coordinates></LinearRing></outerBoundaryIs>
